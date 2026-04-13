@@ -226,7 +226,7 @@ async def start_create_auction(
     )
 
 
-@router.message(F.text == "🔴 Активные аукционы")
+@router.message(F.text == "🟢 Активные аукционы")
 async def show_active_auctions(message: Message, session: AsyncSession) -> None:
     if not await is_any_staff(session, message.from_user.id):
         return
@@ -254,7 +254,7 @@ async def show_active_auctions(message: Message, session: AsyncSession) -> None:
         )
 
 
-@router.message(F.text == "✅ Завершённые аукционы")
+@router.message(F.text == "🏁 Завершённые аукционы")
 async def show_completed_auctions(message: Message, session: AsyncSession) -> None:
     if not await is_any_staff(session, message.from_user.id):
         return

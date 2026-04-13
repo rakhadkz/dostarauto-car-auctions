@@ -11,8 +11,8 @@ from callbacks import AuctionCB, DonePhotosCB, StaffActionCB, UserActionCB
 
 _COMMON_ROWS = [
     [KeyboardButton(text="📋 Создать аукцион")],
-    [KeyboardButton(text="🔴 Активные аукционы")],
-    [KeyboardButton(text="✅ Завершённые аукционы")],
+    [KeyboardButton(text="🟢 Активные аукционы")],
+    [KeyboardButton(text="🏁 Завершённые аукционы")],
     [KeyboardButton(text="👥 Заявки на регистрацию")],
     [KeyboardButton(text="💰 Ожидают оплаты")],
     [KeyboardButton(text="✔️ Подтверждение оплаты")],
