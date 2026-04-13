@@ -6,8 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import fmt_dt
 from database import async_session_factory
 from keyboards.participant import auction_update_keyboard
+from services.auction_close_service import finalize_auction_close
 from services.auction_service import get_auction_with_bids, get_expired_active_auctions
-from services.notification_service import notify_auction_finished, notify_winner
 
 logger = logging.getLogger(__name__)
 
@@ -49,28 +49,6 @@ async def check_and_close_auctions(bot: Bot) -> None:
 
         for auction in auctions:
             try:
-                await _close_auction(session, bot, auction)
+                await finalize_auction_close(session, bot, auction, mode="scheduled")
             except Exception as e:
                 logger.error(f"Error closing auction {auction.id} '{auction.title}': {e}")
-
-
-async def _close_auction(session: AsyncSession, bot: Bot, auction) -> None:
-    winner_bid = None
-    if auction.bids:
-        winner_bid = max(auction.bids, key=lambda b: float(b.amount))
-
-    auction.status = "finished"
-    auction.winner_id = winner_bid.user_id if winner_bid else None
-    await session.commit()
-
-    logger.info(
-        f"Auction {auction.id} '{auction.title}' closed. "
-        f"Winner: {winner_bid.user.telegram_id if winner_bid else 'none'}"
-    )
-
-    winner_user_id = winner_bid.user_id if winner_bid else None
-    for bid in auction.bids:
-        if bid.user_id == winner_user_id:
-            await notify_winner(bot, bid.user, auction, float(bid.amount))
-        else:
-            await notify_auction_finished(bot, bid.user, auction)

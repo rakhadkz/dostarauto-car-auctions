@@ -1,3 +1,4 @@
+import html
 import logging
 
 from aiogram import Bot
@@ -30,7 +31,9 @@ async def notify_admins(
 
     for admin_id in recipient_ids:
         try:
-            await bot.send_message(admin_id, text, reply_markup=reply_markup, parse_mode=parse_mode)
+            await bot.send_message(
+                admin_id, text, reply_markup=reply_markup, parse_mode=parse_mode
+            )
         except Exception as e:
             logger.error(f"Failed to notify staff {admin_id}: {e}")
 
@@ -61,13 +64,17 @@ async def send_auction_to_user(bot: Bot, user_id: int, auction: Auction) -> None
         logger.error(f"Failed to send auction to user {user_id}: {e}")
 
 
-async def notify_auction_created(bot: Bot, session: AsyncSession, auction: Auction) -> None:
+async def notify_auction_created(
+    bot: Bot, session: AsyncSession, auction: Auction
+) -> None:
     approved_users = await get_approved_users(session)
     for user in approved_users:
         await send_auction_to_user(bot, user.telegram_id, auction)
 
 
-async def notify_winner(bot: Bot, winner: User, auction: Auction, winning_amount: float) -> None:
+async def notify_winner(
+    bot: Bot, winner: User, auction: Auction, winning_amount: float
+) -> None:
     try:
         text = (
             f"🎉 *Поздравляем! Вы выиграли аукцион!*\n\n"
@@ -82,10 +89,52 @@ async def notify_winner(bot: Bot, winner: User, auction: Auction, winning_amount
 
 async def notify_auction_finished(bot: Bot, user: User, auction: Auction) -> None:
     try:
-        text = (
-            f"🏁 *Аукцион завершён:* {auction.title}\n\n"
-            f"Спасибо за участие!"
-        )
+        text = f"🏁 *Аукцион завершён:* {auction.title}\n\n" f"Спасибо за участие!"
         await bot.send_message(user.telegram_id, text, parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Failed to notify participant {user.telegram_id}: {e}")
+
+
+async def notify_staff_auction_closed(
+    bot: Bot,
+    session: AsyncSession,
+    auction: Auction,
+    winning_amount: float | None,
+    *,
+    early: bool = False,
+) -> None:
+    """Notifies superadmins and DB staff when an auction ends (winner only)."""
+    title_esc = html.escape(auction.title or "")
+    if early:
+        header = "⏱️ <b>Аукцион был досрочно завершён</b>"
+    else:
+        header = "🏁 <b>Аукцион завершён</b>"
+    time_caption = "Запланированное время завершения" if early else "Время завершения"
+    lines = [
+        header,
+        "",
+        f"🚗 <b>{title_esc}</b>",
+        f"🆔 ID аукциона: <code>{auction.id}</code>",
+        f"⏰ {time_caption}: {html.escape(fmt_dt(auction.end_time))}",
+        "",
+    ]
+    if auction.winner_id and winning_amount is not None:
+        winner = next(
+            (b.user for b in auction.bids if b.user_id == auction.winner_id), None
+        )
+        if winner:
+            lines.append(
+                f"🏆 <b>Победитель — {html.escape(winner.full_name or '')}</b>"
+            )
+            lines.append(f"📞 {html.escape(winner.phone or '')}")
+            lines.append(f"💰 Ставка: <b>{winning_amount:,.0f}</b> KZT")
+        else:
+            lines.append(
+                f"🏆 Победитель ID: <code>{auction.winner_id}</code> — "
+                f"<b>{winning_amount:,.0f}</b> KZT"
+            )
+    else:
+        lines.append("⚠️ <b>Победителя нет</b> (ставок не было).")
+
+    text = "\n".join(lines)
+    await notify_admins(bot, text, session=session, parse_mode="HTML")

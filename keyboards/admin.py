@@ -22,7 +22,8 @@ _COMMON_ROWS = [
 
 def superadmin_main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        keyboard=_COMMON_ROWS + [
+        keyboard=_COMMON_ROWS
+        + [
             [KeyboardButton(text="🚫 Заблокированные пользователи")],
             [KeyboardButton(text="👑 Управление персоналом")],
         ],
@@ -32,7 +33,8 @@ def superadmin_main_keyboard() -> ReplyKeyboardMarkup:
 
 def admin_main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        keyboard=_COMMON_ROWS + [
+        keyboard=_COMMON_ROWS
+        + [
             [KeyboardButton(text="🚫 Заблокированные пользователи")],
         ],
         resize_keyboard=True,
@@ -80,16 +82,47 @@ def payment_confirmation_keyboard(user_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def auction_view_keyboard(auction_id: int) -> InlineKeyboardMarkup:
+def auction_view_keyboard(
+    auction_id: int, *, active: bool = False
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = [
+        [
+            InlineKeyboardButton(
+                text="📊 Просмотр ставок",
+                callback_data=AuctionCB(action="view", auction_id=auction_id).pack(),
+            )
+        ]
+    ]
+    if active:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="⏱️ Завершить досрочно",
+                    callback_data=AuctionCB(
+                        action="end_early", auction_id=auction_id
+                    ).pack(),
+                )
+            ]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def early_close_confirm_keyboard(auction_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="📊 Просмотр ставок",
+                    text="✅ Да, завершить",
                     callback_data=AuctionCB(
-                        action="view", auction_id=auction_id
+                        action="end_early_confirm", auction_id=auction_id
                     ).pack(),
-                )
+                ),
+                InlineKeyboardButton(
+                    text="❌ Отмена",
+                    callback_data=AuctionCB(
+                        action="end_early_cancel", auction_id=auction_id
+                    ).pack(),
+                ),
             ]
         ]
     )
@@ -129,7 +162,9 @@ def staff_remove_keyboard(staff_id: int) -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(
                     text="🗑 Удалить",
-                    callback_data=StaffActionCB(action="remove", staff_id=staff_id).pack(),
+                    callback_data=StaffActionCB(
+                        action="remove", staff_id=staff_id
+                    ).pack(),
                 )
             ]
         ]

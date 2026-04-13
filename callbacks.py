@@ -7,7 +7,7 @@ class UserActionCB(CallbackData, prefix="usr"):
 
 
 class AuctionCB(CallbackData, prefix="auc"):
-    action: str  # view | bid | update_bid
+    action: str  # view | bid | update_bid | end_early | end_early_confirm | end_early_cancel
     auction_id: int
 
 

@@ -47,7 +47,9 @@ def auction_update_keyboard(auction_id: int) -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(
                     text="✏️ Изменить ставку",
-                    callback_data=AuctionCB(action="update_bid", auction_id=auction_id).pack(),
+                    callback_data=AuctionCB(
+                        action="update_bid", auction_id=auction_id
+                    ).pack(),
                 ),
             ]
         ]
