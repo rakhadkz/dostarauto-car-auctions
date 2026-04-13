@@ -24,7 +24,9 @@ config = context.config
 # Override sqlalchemy.url from environment variable
 database_url = os.environ.get("DATABASE_URL")
 if database_url:
-    config.set_main_option("sqlalchemy.url", database_url)
+    # Alembic uses ConfigParser: % starts interpolation. URL-encoded passwords
+    # (e.g. %7C) must be doubled so readback yields a valid URL for asyncpg.
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
