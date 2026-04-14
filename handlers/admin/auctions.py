@@ -34,6 +34,8 @@ from states.auction import AuctionCreationStates
 logger = logging.getLogger(__name__)
 router = Router()
 
+MAX_AUCTION_PHOTOS = 30
+
 
 # ── Auction creation FSM ────────────────────────────────────────────────────
 
@@ -48,7 +50,7 @@ async def process_title(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(title=title)
     await state.set_state(AuctionCreationStates.waiting_description)
-    await message.answer("Шаг 2/5: Введите *описание*:", parse_mode="Markdown")
+    await message.answer("Шаг 2/6: Введите *описание*:", parse_mode="Markdown")
 
 
 @router.message(AuctionCreationStates.waiting_description)
@@ -60,7 +62,7 @@ async def process_description(message: Message, state: FSMContext) -> None:
     await state.update_data(description=desc)
     await state.set_state(AuctionCreationStates.waiting_min_bid)
     await message.answer(
-        "Шаг 3/5: Введите *минимальную ставку* (тенге):", parse_mode="Markdown"
+        "Шаг 3/6: Введите *минимальную ставку* (тенге):", parse_mode="Markdown"
     )
 
 
@@ -78,9 +80,35 @@ async def process_min_bid(message: Message, state: FSMContext) -> None:
         return
 
     await state.update_data(min_bid=min_bid)
+    await state.set_state(AuctionCreationStates.waiting_bid_step)
+    await message.answer(
+        "Шаг 4/6: Введите *минимальный шаг ставки* (тенге).\n"
+        "Например: 100 000 — каждая следующая ставка должна быть выше предыдущей максимальной как минимум на эту сумму:",
+        parse_mode="Markdown",
+    )
+
+
+@router.message(AuctionCreationStates.waiting_bid_step)
+async def process_bid_step(message: Message, state: FSMContext) -> None:
+    raw = (
+        message.text.strip().replace(",", "").replace(".", "").replace(" ", "")
+        if message.text
+        else ""
+    )
+    try:
+        bid_step = float(raw)
+        if bid_step <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer(
+            "❌ Введите корректное положительное число (например: 100 000):"
+        )
+        return
+
+    await state.update_data(bid_step=bid_step)
     await state.set_state(AuctionCreationStates.waiting_duration)
     await message.answer(
-        "Шаг 4/5: Введите *длительность аукциона в минутах* (например, 120 — это 2 часа):",
+        "Шаг 5/6: Введите *длительность аукциона в минутах* (например, 120 — это 2 часа):",
         parse_mode="Markdown",
     )
 
@@ -99,7 +127,7 @@ async def process_duration(message: Message, state: FSMContext) -> None:
     await state.update_data(duration=duration, photos=[])
     await state.set_state(AuctionCreationStates.waiting_photos)
     await message.answer(
-        "Шаг 5/5: Отправьте фотографии автомобиля (до 10 штук).\n"
+        f"Шаг 6/6: Отправьте фотографии автомобиля (до {MAX_AUCTION_PHOTOS} штук).\n"
         "Когда закончите, нажмите кнопку или отправьте /done.",
         reply_markup=done_photos_keyboard(),
     )
@@ -110,9 +138,9 @@ async def process_photo(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     photos: list[str] = data.get("photos", [])
 
-    if len(photos) >= 10:
+    if len(photos) >= MAX_AUCTION_PHOTOS:
         await message.answer(
-            "⚠️ Достигнут максимум 10 фото. Нажмите *Готово* для публикации.",
+            f"⚠️ Достигнут максимум {MAX_AUCTION_PHOTOS} фото. Нажмите *Готово* для публикации.",
             parse_mode="Markdown",
         )
         return
@@ -121,7 +149,7 @@ async def process_photo(message: Message, state: FSMContext) -> None:
     photos.append(file_id)
     await state.update_data(photos=photos)
     await message.answer(
-        f"✅ Фото {len(photos)}/10 добавлено. Отправьте ещё или нажмите *Готово*.",
+        f"✅ Фото {len(photos)}/{MAX_AUCTION_PHOTOS} добавлено. Отправьте ещё или нажмите *Готово*.",
         parse_mode="Markdown",
         reply_markup=done_photos_keyboard(),
     )
@@ -169,6 +197,7 @@ async def _finish_auction_creation(
         title=data["title"],
         description=data["description"],
         min_bid=data["min_bid"],
+        bid_step=data["bid_step"],
         duration_minutes=data["duration"],
         photo_file_ids=data.get("photos", []),
     )
@@ -221,7 +250,7 @@ async def start_create_auction(
         return
     await state.set_state(AuctionCreationStates.waiting_title)
     await message.answer(
-        "🚗 *Создание нового аукциона*\n\nШаг 1/5: Введите *название автомобиля*:",
+        "🚗 *Создание нового аукциона*\n\nШаг 1/6: Введите *название автомобиля*:",
         parse_mode="Markdown",
     )
 

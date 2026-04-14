@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from callbacks import UserActionCB
 from config import settings
 from keyboards.participant import paid_keyboard, participant_main_keyboard
-from permissions import can_revoke, is_any_staff
+from permissions import can_manage_clients, can_revoke
 from services.user_service import get_users_by_status, update_user_status
 
 router = Router()
@@ -23,7 +23,7 @@ def _fmt_user(user) -> str:
 
 @router.message(F.text == "👥 Заявки на регистрацию")
 async def show_pending_users(message: Message, session: AsyncSession) -> None:
-    if not await is_any_staff(session, message.from_user.id):
+    if not await can_manage_clients(session, message.from_user.id):
         return
 
     from keyboards.admin import user_approval_keyboard
@@ -43,7 +43,7 @@ async def show_pending_users(message: Message, session: AsyncSession) -> None:
 
 @router.message(F.text == "💰 Ожидают оплаты")
 async def show_awaiting_payment(message: Message, session: AsyncSession) -> None:
-    if not await is_any_staff(session, message.from_user.id):
+    if not await can_manage_clients(session, message.from_user.id):
         return
 
     users = await get_users_by_status(session, "approved_waiting_payment")
@@ -57,7 +57,7 @@ async def show_awaiting_payment(message: Message, session: AsyncSession) -> None
 
 @router.message(F.text == "✔️ Подтверждение оплаты")
 async def show_payment_confirmations(message: Message, session: AsyncSession) -> None:
-    if not await is_any_staff(session, message.from_user.id):
+    if not await can_manage_clients(session, message.from_user.id):
         return
 
     from keyboards.admin import payment_confirmation_keyboard
@@ -77,7 +77,7 @@ async def show_payment_confirmations(message: Message, session: AsyncSession) ->
 
 @router.message(F.text == "👤 Одобренные пользователи")
 async def show_approved_users(message: Message, session: AsyncSession) -> None:
-    if not await is_any_staff(session, message.from_user.id):
+    if not await can_manage_clients(session, message.from_user.id):
         return
 
     from keyboards.admin import revoke_keyboard
@@ -119,7 +119,7 @@ async def show_revoked_users(message: Message, session: AsyncSession) -> None:
 async def approve_user(
     callback: CallbackQuery, callback_data: UserActionCB, session: AsyncSession, bot: Bot
 ) -> None:
-    if not await is_any_staff(session, callback.from_user.id):
+    if not await can_manage_clients(session, callback.from_user.id):
         await callback.answer("Нет доступа", show_alert=True)
         return
 
@@ -150,7 +150,7 @@ async def approve_user(
 async def reject_user(
     callback: CallbackQuery, callback_data: UserActionCB, session: AsyncSession, bot: Bot
 ) -> None:
-    if not await is_any_staff(session, callback.from_user.id):
+    if not await can_manage_clients(session, callback.from_user.id):
         await callback.answer("Нет доступа", show_alert=True)
         return
 
@@ -235,7 +235,7 @@ async def restore_user(
 async def confirm_payment(
     callback: CallbackQuery, callback_data: UserActionCB, session: AsyncSession, bot: Bot
 ) -> None:
-    if not await is_any_staff(session, callback.from_user.id):
+    if not await can_manage_clients(session, callback.from_user.id):
         await callback.answer("Нет доступа", show_alert=True)
         return
 

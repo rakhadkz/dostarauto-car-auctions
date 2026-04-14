@@ -30,3 +30,9 @@ async def can_revoke(session: AsyncSession, telegram_id: int) -> bool:
 
 async def can_manage_staff(session: AsyncSession, telegram_id: int) -> bool:
     return is_superadmin(telegram_id)
+
+
+async def can_manage_clients(session: AsyncSession, telegram_id: int) -> bool:
+    """Managers may only manage auctions, not users (approve/revoke/payments)."""
+    role = await get_role(session, telegram_id)
+    return role in ("superadmin", "admin")

@@ -51,6 +51,33 @@ def auction_update_keyboard(auction_id: int) -> InlineKeyboardMarkup:
                         action="update_bid", auction_id=auction_id
                     ).pack(),
                 ),
+                InlineKeyboardButton(
+                    text="🗑 Удалить ставку",
+                    callback_data=AuctionCB(
+                        action="delete_bid", auction_id=auction_id
+                    ).pack(),
+                ),
+            ]
+        ]
+    )
+
+
+def delete_bid_confirm_keyboard(auction_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Да, удалить",
+                    callback_data=AuctionCB(
+                        action="delete_bid_confirm", auction_id=auction_id
+                    ).pack(),
+                ),
+                InlineKeyboardButton(
+                    text="❌ Отмена",
+                    callback_data=AuctionCB(
+                        action="delete_bid_cancel", auction_id=auction_id
+                    ).pack(),
+                ),
             ]
         ]
     )

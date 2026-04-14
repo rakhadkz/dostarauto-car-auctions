@@ -9,10 +9,13 @@ from callbacks import AuctionCB, DonePhotosCB, StaffActionCB, UserActionCB
 
 # ── Role-based main keyboards ─────────────────────────────────────────────────
 
-_COMMON_ROWS = [
+_AUCTION_ROWS = [
     [KeyboardButton(text="📋 Создать аукцион")],
     [KeyboardButton(text="🟢 Активные аукционы")],
     [KeyboardButton(text="🏁 Завершённые аукционы")],
+]
+
+_COMMON_ROWS = _AUCTION_ROWS + [
     [KeyboardButton(text="👥 Заявки на регистрацию")],
     [KeyboardButton(text="💰 Ожидают оплаты")],
     [KeyboardButton(text="✔️ Подтверждение оплаты")],
@@ -42,8 +45,9 @@ def admin_main_keyboard() -> ReplyKeyboardMarkup:
 
 
 def manager_main_keyboard() -> ReplyKeyboardMarkup:
+    """Managers: auctions only (no user management)."""
     return ReplyKeyboardMarkup(
-        keyboard=_COMMON_ROWS,
+        keyboard=_AUCTION_ROWS,
         resize_keyboard=True,
     )
 

@@ -12,6 +12,7 @@ class Auction(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     min_bid: Mapped[float] = mapped_column(Numeric(15, 2), nullable=False)
+    bid_step: Mapped[float] = mapped_column(Numeric(15, 2), nullable=False, default=100000)
     end_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     winner_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)

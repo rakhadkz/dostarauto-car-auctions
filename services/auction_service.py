@@ -13,6 +13,7 @@ async def create_auction(
     title: str,
     description: str,
     min_bid: float,
+    bid_step: float,
     duration_minutes: int,
     photo_file_ids: list[str],
 ) -> Auction:
@@ -22,6 +23,7 @@ async def create_auction(
         title=title,
         description=description,
         min_bid=min_bid,
+        bid_step=bid_step,
         end_time=end_time,
         status="active",
         created_at=utc_now,

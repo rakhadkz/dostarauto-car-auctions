@@ -1,17 +1,23 @@
 import html
 import logging
+from typing import Literal
 
 from aiogram import Bot
 from aiogram.types import InputMediaPhoto
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from config import fmt_dt, settings
-from keyboards.participant import auction_keyboard
-from models import Auction, User
+from keyboards.participant import auction_keyboard, auction_update_keyboard
+from models import Auction, Bid, User
 from services.staff_service import get_all_staff
 from services.user_service import get_approved_users
 
 logger = logging.getLogger(__name__)
+
+# Telegram allows at most 10 items per send_media_group / answer_media_group.
+_TELEGRAM_MEDIA_GROUP_LIMIT = 10
 
 
 async def notify_admins(
@@ -20,13 +26,23 @@ async def notify_admins(
     reply_markup=None,
     parse_mode: str = "Markdown",
     session=None,
+    *,
+    staff_filter: Literal["all", "admins_only"] = "all",
 ) -> None:
-    """Notifies all superadmins (from env) and all staff (from DB) if session is provided."""
+    """
+    Notifies superadmins (from env) and DB staff when session is provided.
+
+    staff_filter:
+      - all: superadmins + every staff row (admin + manager) — e.g. bids, auction closed
+      - admins_only: superadmins + staff with role admin — e.g. registration / payments
+    """
     recipient_ids: set[int] = set(settings.superadmin_ids)
 
     if session is not None:
         staff_list = await get_all_staff(session)
         for s in staff_list:
+            if staff_filter == "admins_only" and s.role != "admin":
+                continue
             recipient_ids.add(s.telegram_id)
 
     for admin_id in recipient_ids:
@@ -41,11 +57,14 @@ async def notify_admins(
 async def send_auction_to_user(bot: Bot, user_id: int, auction: Auction) -> None:
     try:
         if auction.photos:
-            if len(auction.photos) == 1:
-                await bot.send_photo(user_id, auction.photos[0].file_id)
+            plist = list(auction.photos)
+            if len(plist) == 1:
+                await bot.send_photo(user_id, plist[0].file_id)
             else:
-                media = [InputMediaPhoto(media=p.file_id) for p in auction.photos]
-                await bot.send_media_group(user_id, media)
+                for i in range(0, len(plist), _TELEGRAM_MEDIA_GROUP_LIMIT):
+                    chunk = plist[i : i + _TELEGRAM_MEDIA_GROUP_LIMIT]
+                    media = [InputMediaPhoto(media=p.file_id) for p in chunk]
+                    await bot.send_media_group(user_id, media)
 
         end_time_str = fmt_dt(auction.end_time)
         text = (
@@ -138,3 +157,99 @@ async def notify_staff_auction_closed(
 
     text = "\n".join(lines)
     await notify_admins(bot, text, session=session, parse_mode="HTML")
+
+
+async def notify_bid_placed(
+    bot: Bot,
+    session: AsyncSession,
+    auction: Auction,
+    new_max: float,
+    next_min: float,
+    author_user_id: int,
+) -> None:
+    """Notify all bidders on the auction (except the one who just bid) about the new max."""
+    result = await session.execute(
+        select(Bid)
+        .where(Bid.auction_id == auction.id, Bid.user_id != author_user_id)
+        .options(selectinload(Bid.user))
+    )
+    bids = result.scalars().all()
+    bid_step = float(auction.bid_step)
+
+    for bid in bids:
+        my_amount = float(bid.amount)
+        personal = f"💵 *Ваша текущая ставка:* {my_amount:,.0f} KZT\n\n"
+        text = (
+            f"🔔 *Новая ставка в аукционе!*\n\n"
+            f"🚗 {auction.title}\n\n"
+            f"{personal}"
+            f"💰 Текущая максимальная ставка: *{new_max:,.0f} KZT*\n"
+            f"📈 Шаг ставки: *{bid_step:,.0f} KZT*\n\n"
+            f"Чтобы стать лидером, ваша ставка должна быть не менее *{next_min:,.0f} KZT*"
+        )
+        try:
+            await bot.send_message(
+                bid.user.telegram_id,
+                text,
+                parse_mode="Markdown",
+                reply_markup=auction_update_keyboard(auction.id),
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify bidder {bid.user.telegram_id}: {e}")
+
+
+async def notify_bidders_max_changed_after_withdrawal(
+    bot: Bot,
+    session: AsyncSession,
+    auction: Auction,
+    new_max: float | None,
+    exclude_user_id: int,
+) -> None:
+    """Notify remaining bidders when the auction max may have changed after a withdrawal."""
+    result = await session.execute(
+        select(Bid)
+        .where(Bid.auction_id == auction.id, Bid.user_id != exclude_user_id)
+        .options(selectinload(Bid.user))
+    )
+    bids = result.scalars().all()
+    if not bids:
+        return
+
+    bid_step = float(auction.bid_step)
+    if new_max is None:
+        next_min = float(auction.min_bid)
+        max_line = "_Ставок пока нет — вы можете стать лидером с минимальной ставки._"
+    else:
+        next_min = new_max + bid_step
+        max_line = f"💰 Текущая максимальная ставка: *{new_max:,.0f} KZT*"
+
+    for bid in bids:
+        my_amount = float(bid.amount)
+        is_leader = new_max is not None and abs(my_amount - new_max) < 0.01
+        personal = f"💵 *Ваша текущая ставка:* {my_amount:,.0f} KZT\n"
+        if is_leader:
+            personal += "🏆 *Вы лидируете* — у вас сейчас максимальная ставка.\n"
+        personal += "\n"
+
+        footer = (
+            ""
+            if is_leader
+            else f"\n\nЧтобы стать лидером, ваша ставка должна быть не менее *{next_min:,.0f} KZT*"
+        )
+        text = (
+            f"📉 *Максимальная ставка в аукционе изменилась*\n\n"
+            f"🚗 {auction.title}\n\n"
+            f"{personal}"
+            f"{max_line}\n"
+            f"📈 Шаг ставки: *{bid_step:,.0f} KZT*"
+            f"{footer}"
+        )
+        try:
+            await bot.send_message(
+                bid.user.telegram_id,
+                text,
+                parse_mode="Markdown",
+                reply_markup=auction_update_keyboard(auction.id),
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify bidder {bid.user.telegram_id}: {e}")

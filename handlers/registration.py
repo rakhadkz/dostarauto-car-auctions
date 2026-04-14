@@ -87,7 +87,13 @@ async def process_bank_account(message: Message, state: FSMContext, session: Asy
         f"🏦 Счёт: `{user.bank_account}`\n"
         f"Telegram ID: `{user.telegram_id}`"
     )
-    await notify_admins(bot, text, reply_markup=user_approval_keyboard(user.id))
+    await notify_admins(
+        bot,
+        text,
+        reply_markup=user_approval_keyboard(user.id),
+        session=session,
+        staff_filter="admins_only",
+    )
 
 
 @router.message(F.text == "💳 Я оплатил")
@@ -113,4 +119,10 @@ async def user_paid(message: Message, session: AsyncSession, bot: Bot) -> None:
         f"ИИН: {user.iin}\n"
         f"Telegram ID: `{user.telegram_id}`"
     )
-    await notify_admins(bot, text, reply_markup=payment_confirmation_keyboard(user.id))
+    await notify_admins(
+        bot,
+        text,
+        reply_markup=payment_confirmation_keyboard(user.id),
+        session=session,
+        staff_filter="admins_only",
+    )
