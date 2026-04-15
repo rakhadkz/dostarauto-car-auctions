@@ -1,8 +1,9 @@
 import logging
+import math
 from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot, F, Router
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -10,18 +11,23 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from callbacks import AuctionCB, DonePhotosCB
+from callbacks import AuctionCB, DonePhotosCB, PageCB
 from config import fmt_dt, settings
-from permissions import is_any_staff
+from permissions import get_role, is_any_staff
 from keyboards.admin import (
-    admin_main_keyboard,
+    PAGE_SIZE,
+    auction_creation_cancel_keyboard,
     auction_view_keyboard,
+    AUCTION_CREATION_CANCEL_TEXT,
     done_photos_keyboard,
     early_close_confirm_keyboard,
+    pagination_keyboard,
+    staff_main_keyboard_for_role,
 )
 from models import Auction, Bid
 from services.auction_close_service import finalize_auction_close
 from services.auction_service import (
+    count_completed_auctions,
     create_auction,
     get_active_auctions,
     get_auction_with_bids,
@@ -40,29 +46,56 @@ MAX_AUCTION_PHOTOS = 30
 # ── Auction creation FSM ────────────────────────────────────────────────────
 
 
+@router.message(
+    F.text == AUCTION_CREATION_CANCEL_TEXT,
+    StateFilter(AuctionCreationStates),
+)
+async def cancel_auction_creation(
+    message: Message, state: FSMContext, session: AsyncSession
+) -> None:
+    if not await is_any_staff(session, message.from_user.id):
+        return
+    await state.clear()
+    role = await get_role(session, message.from_user.id)
+    await message.answer(
+        "❌ Создание аукциона отменено.",
+        reply_markup=staff_main_keyboard_for_role(role or "manager"),
+    )
+
+
 @router.message(AuctionCreationStates.waiting_title)
 async def process_title(message: Message, state: FSMContext) -> None:
     title = message.text.strip() if message.text else ""
     if not title:
         await message.answer(
-            "❌ Название не может быть пустым. Введите название автомобиля:"
+            "❌ Название не может быть пустым. Введите название автомобиля:",
+            reply_markup=auction_creation_cancel_keyboard(),
         )
         return
     await state.update_data(title=title)
     await state.set_state(AuctionCreationStates.waiting_description)
-    await message.answer("Шаг 2/6: Введите *описание*:", parse_mode="Markdown")
+    await message.answer(
+        "Шаг 2/6: Введите *описание*:",
+        parse_mode="Markdown",
+        reply_markup=auction_creation_cancel_keyboard(),
+    )
 
 
 @router.message(AuctionCreationStates.waiting_description)
 async def process_description(message: Message, state: FSMContext) -> None:
     desc = message.text.strip() if message.text else ""
     if not desc:
-        await message.answer("❌ Описание не может быть пустым. Попробуйте ещё раз:")
+        await message.answer(
+            "❌ Описание не может быть пустым. Попробуйте ещё раз:",
+            reply_markup=auction_creation_cancel_keyboard(),
+        )
         return
     await state.update_data(description=desc)
     await state.set_state(AuctionCreationStates.waiting_min_bid)
     await message.answer(
-        "Шаг 3/6: Введите *минимальную ставку* (тенге):", parse_mode="Markdown"
+        "Шаг 3/6: Введите *минимальную ставку* (тенге):",
+        parse_mode="Markdown",
+        reply_markup=auction_creation_cancel_keyboard(),
     )
 
 
@@ -75,7 +108,8 @@ async def process_min_bid(message: Message, state: FSMContext) -> None:
             raise ValueError
     except ValueError:
         await message.answer(
-            "❌ Введите корректное положительное число (например: 500000):"
+            "❌ Введите корректное положительное число (например: 500000):",
+            reply_markup=auction_creation_cancel_keyboard(),
         )
         return
 
@@ -85,6 +119,7 @@ async def process_min_bid(message: Message, state: FSMContext) -> None:
         "Шаг 4/6: Введите *минимальный шаг ставки* (тенге).\n"
         "Например: 100 000 — каждая следующая ставка должна быть выше предыдущей максимальной как минимум на эту сумму:",
         parse_mode="Markdown",
+        reply_markup=auction_creation_cancel_keyboard(),
     )
 
 
@@ -101,7 +136,8 @@ async def process_bid_step(message: Message, state: FSMContext) -> None:
             raise ValueError
     except ValueError:
         await message.answer(
-            "❌ Введите корректное положительное число (например: 100 000):"
+            "❌ Введите корректное положительное число (например: 100 000):",
+            reply_markup=auction_creation_cancel_keyboard(),
         )
         return
 
@@ -110,6 +146,7 @@ async def process_bid_step(message: Message, state: FSMContext) -> None:
     await message.answer(
         "Шаг 5/6: Введите *длительность аукциона в минутах* (например, 120 — это 2 часа):",
         parse_mode="Markdown",
+        reply_markup=auction_creation_cancel_keyboard(),
     )
 
 
@@ -121,14 +158,18 @@ async def process_duration(message: Message, state: FSMContext) -> None:
         if duration <= 0:
             raise ValueError
     except ValueError:
-        await message.answer("❌ Введите корректное количество минут (например: 60):")
+        await message.answer(
+            "❌ Введите корректное количество минут (например: 60):",
+            reply_markup=auction_creation_cancel_keyboard(),
+        )
         return
 
     await state.update_data(duration=duration, photos=[])
     await state.set_state(AuctionCreationStates.waiting_photos)
     await message.answer(
         f"Шаг 6/6: Отправьте фотографии автомобиля (до {MAX_AUCTION_PHOTOS} штук).\n"
-        "Когда закончите, нажмите кнопку или отправьте /done.",
+        "Когда закончите, нажмите кнопку или отправьте /done.\n"
+        f"Или нажмите «{AUCTION_CREATION_CANCEL_TEXT}» ниже.",
         reply_markup=done_photos_keyboard(),
     )
 
@@ -188,7 +229,11 @@ async def _finish_auction_creation(
     data = await state.get_data()
 
     if not data.get("title"):
-        await message.answer("❌ Данные аукциона утеряны. Начните заново с /cancel.")
+        role = await get_role(session, message.from_user.id)
+        await message.answer(
+            "❌ Данные аукциона утеряны. Начните заново: «📋 Создать аукцион».",
+            reply_markup=staff_main_keyboard_for_role(role or "manager"),
+        )
         await state.clear()
         return
 
@@ -204,6 +249,7 @@ async def _finish_auction_creation(
     await state.clear()
 
     end_str = fmt_dt(auction.end_time)
+    role = await get_role(session, message.from_user.id)
     await message.answer(
         f"✅ *Аукцион создан!*\n\n"
         f"🚗 {auction.title}\n"
@@ -211,7 +257,7 @@ async def _finish_auction_creation(
         f"⏰ Завершается: {end_str}\n"
         f"📸 Фото: {len(data.get('photos', []))}",
         parse_mode="Markdown",
-        reply_markup=admin_main_keyboard(),
+        reply_markup=staff_main_keyboard_for_role(role or "manager"),
     )
 
     # Reload with photos for notification
@@ -252,6 +298,7 @@ async def start_create_auction(
     await message.answer(
         "🚗 *Создание нового аукциона*\n\nШаг 1/6: Введите *название автомобиля*:",
         parse_mode="Markdown",
+        reply_markup=auction_creation_cancel_keyboard(),
     )
 
 
@@ -283,23 +330,56 @@ async def show_active_auctions(message: Message, session: AsyncSession) -> None:
         )
 
 
-@router.message(F.text == "🏁 Завершённые аукционы")
-async def show_completed_auctions(message: Message, session: AsyncSession) -> None:
-    if not await is_any_staff(session, message.from_user.id):
-        return
-
-    auctions = await get_completed_auctions(session)
-    if not auctions:
+async def _send_completed_page(
+    message: Message, session: AsyncSession, page: int
+) -> None:
+    total = await count_completed_auctions(session)
+    if total == 0:
         await message.answer("📭 Нет завершённых аукционов.")
         return
 
+    total_pages = math.ceil(total / PAGE_SIZE)
+    page = max(1, min(page, total_pages))
+    offset = (page - 1) * PAGE_SIZE
+
+    auctions = await get_completed_auctions(session, offset=offset, limit=PAGE_SIZE)
+
+    start_idx = offset + 1
+    end_idx = offset + len(auctions)
+    await message.answer(
+        f"🏁 Завершённые аукционы ({start_idx}–{end_idx} из {total})",
+        parse_mode="Markdown",
+    )
+
     for auction in auctions:
-        text = f"🏁 *{auction.title}*\n" f"📅 Завершён: {fmt_dt(auction.end_time)}"
+        text = f"🏁 *{auction.title}*\n📅 Завершён: {fmt_dt(auction.end_time)}"
         await message.answer(
             text,
             parse_mode="Markdown",
             reply_markup=auction_view_keyboard(auction.id),
         )
+
+    nav = pagination_keyboard("completed", page, total_pages)
+    if nav:
+        await message.answer(f"Страница: {page}/{total_pages}", reply_markup=nav)
+
+
+@router.message(F.text == "🏁 Завершённые аукционы")
+async def show_completed_auctions(message: Message, session: AsyncSession) -> None:
+    if not await is_any_staff(session, message.from_user.id):
+        return
+    await _send_completed_page(message, session, 1)
+
+
+@router.callback_query(PageCB.filter(F.section == "completed"))
+async def paginate_completed(
+    callback: CallbackQuery, callback_data: PageCB, session: AsyncSession
+) -> None:
+    if not await is_any_staff(session, callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    await callback.answer()
+    await _send_completed_page(callback.message, session, callback_data.page)
 
 
 @router.callback_query(AuctionCB.filter(F.action == "view"))

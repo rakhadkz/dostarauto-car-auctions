@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import User
@@ -50,10 +50,31 @@ async def update_user_status(session: AsyncSession, user_id: int, status: str) -
     return user
 
 
-async def get_users_by_status(session: AsyncSession, status: str) -> list[User]:
+async def count_users_by_status(session: AsyncSession, status: str) -> int:
     result = await session.execute(
-        select(User).where(User.status == status).order_by(User.created_at)
+        select(func.count()).select_from(User).where(User.status == status)
     )
+    return result.scalar_one()
+
+
+async def get_users_by_status(
+    session: AsyncSession,
+    status: str,
+    *,
+    offset: int = 0,
+    limit: int | None = None,
+    order: str = "created_desc",
+) -> list[User]:
+    stmt = select(User).where(User.status == status)
+    if order == "name_asc":
+        stmt = stmt.order_by(User.full_name.asc())
+    else:
+        stmt = stmt.order_by(User.created_at.desc())
+    if offset:
+        stmt = stmt.offset(offset)
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    result = await session.execute(stmt)
     return list(result.scalars().all())
 
 

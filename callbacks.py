@@ -18,3 +18,8 @@ class DonePhotosCB(CallbackData, prefix="done_ph"):
 class StaffActionCB(CallbackData, prefix="stf"):
     action: str  # remove
     staff_id: int
+
+
+class PageCB(CallbackData, prefix="pg"):
+    section: str
+    page: int

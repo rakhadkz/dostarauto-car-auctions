@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from aiogram import Bot, F, Router
+from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InputMediaPhoto, Message
 from sqlalchemy import select
@@ -10,8 +11,10 @@ from sqlalchemy.orm import selectinload
 
 from callbacks import AuctionCB
 from keyboards.participant import (
+    BID_AMOUNT_CANCEL_TEXT,
     auction_keyboard,
     auction_update_keyboard,
+    bid_amount_cancel_keyboard,
     delete_bid_confirm_keyboard,
     participant_main_keyboard,
 )
@@ -41,6 +44,18 @@ _TELEGRAM_MEDIA_GROUP_LIMIT = 10
 # ── FSM handlers must come first ─────────────────────────────────────────────
 
 
+@router.message(
+    F.text == BID_AMOUNT_CANCEL_TEXT,
+    StateFilter(BidStates),
+)
+async def cancel_bid_amount_input(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer(
+        "Ввод ставки отменён.",
+        reply_markup=participant_main_keyboard(),
+    )
+
+
 @router.message(BidStates.waiting_amount)
 async def process_bid_amount(
     message: Message, state: FSMContext, session: AsyncSession, bot: Bot
@@ -51,7 +66,10 @@ async def process_bid_amount(
         if amount <= 0:
             raise ValueError
     except ValueError:
-        await message.answer("❌ Введите корректное положительное число:")
+        await message.answer(
+            "❌ Введите корректное положительное число:",
+            reply_markup=bid_amount_cancel_keyboard(),
+        )
         return
 
     data = await state.get_data()
@@ -59,7 +77,10 @@ async def process_bid_amount(
 
     if not auction_id:
         await state.clear()
-        await message.answer("❌ Что-то пошло не так. Попробуйте ещё раз.")
+        await message.answer(
+            "❌ Что-то пошло не так. Попробуйте ещё раз.",
+            reply_markup=participant_main_keyboard(),
+        )
         return
 
     result = await session.execute(select(Auction).where(Auction.id == auction_id))
@@ -67,12 +88,19 @@ async def process_bid_amount(
 
     if not auction or auction.status != "active":
         await state.clear()
-        await message.answer("❌ Этот аукцион уже завершён.")
+        await message.answer(
+            "❌ Этот аукцион уже завершён.",
+            reply_markup=participant_main_keyboard(),
+        )
         return
 
     user = await get_user_by_telegram_id(session, message.from_user.id)
     if not user:
         await state.clear()
+        await message.answer(
+            "❌ Необходима регистрация.",
+            reply_markup=participant_main_keyboard(),
+        )
         return
 
     bid_step = float(auction.bid_step)
@@ -93,6 +121,7 @@ async def process_bid_amount(
             await message.answer(
                 f"❌ Ставка должна быть не менее *{min_required:,.0f} KZT*. Попробуйте ещё раз:",
                 parse_mode="Markdown",
+                reply_markup=bid_amount_cancel_keyboard(),
             )
         else:
             await message.answer(
@@ -100,6 +129,7 @@ async def process_bid_amount(
                 f"Ваша ставка должна быть не менее *{min_required:,.0f} KZT* "
                 f"(максимум + шаг {bid_step:,.0f} KZT). Попробуйте ещё раз:",
                 parse_mode="Markdown",
+                reply_markup=bid_amount_cancel_keyboard(),
             )
         return
 
@@ -117,6 +147,7 @@ async def process_bid_amount(
                 f"Текущая максимальная ставка: *{latest_max:,.0f} KZT*\n"
                 f"Ваша ставка должна быть не менее *{latest_min_required:,.0f} KZT*. Попробуйте ещё раз:",
                 parse_mode="Markdown",
+                reply_markup=bid_amount_cancel_keyboard(),
             )
             return
 
@@ -132,6 +163,10 @@ async def process_bid_amount(
         f"✅ *Ставка {verb}!*\nВаша ставка: *{amount:,.0f} KZT*\n\n"
         f"Вы можете изменить ставку в любое время до завершения аукциона.",
         parse_mode="Markdown",
+        reply_markup=participant_main_keyboard(),
+    )
+    await message.answer(
+        "Действия по аукциону:",
         reply_markup=auction_update_keyboard(auction_id),
     )
 
@@ -490,6 +525,7 @@ async def handle_bid_callback(
             )
             + f"\nВведите новую ставку (не менее *{min_required:,.0f} KZT*):",
             parse_mode="Markdown",
+            reply_markup=bid_amount_cancel_keyboard(),
         )
     else:
         await callback.message.answer(
@@ -503,6 +539,7 @@ async def handle_bid_callback(
             )
             + f"\nВведите сумму ставки (не менее *{min_required:,.0f} KZT*):",
             parse_mode="Markdown",
+            reply_markup=bid_amount_cancel_keyboard(),
         )
 
     await callback.answer()

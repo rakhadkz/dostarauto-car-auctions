@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta, timezone
-from models.auction import Auction
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -49,13 +48,27 @@ async def get_active_auctions(session: AsyncSession) -> list[Auction]:
     return list(result.scalars().all())
 
 
-async def get_completed_auctions(session: AsyncSession) -> list[Auction]:
+async def count_completed_auctions(session: AsyncSession) -> int:
     result = await session.execute(
+        select(func.count()).select_from(Auction).where(Auction.status == "finished")
+    )
+    return result.scalar_one()
+
+
+async def get_completed_auctions(
+    session: AsyncSession, *, offset: int = 0, limit: int | None = None
+) -> list[Auction]:
+    stmt = (
         select(Auction)
         .where(Auction.status == "finished")
         .options(selectinload(Auction.photos))
         .order_by(Auction.created_at.desc())
     )
+    if offset:
+        stmt = stmt.offset(offset)
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    result = await session.execute(stmt)
     return list(result.scalars().all())
 
 

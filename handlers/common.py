@@ -5,10 +5,17 @@ from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
-from keyboards.admin import admin_main_keyboard, manager_main_keyboard, superadmin_main_keyboard
+from keyboards.admin import (
+    admin_main_keyboard,
+    manager_main_keyboard,
+    staff_main_keyboard_for_role,
+    superadmin_main_keyboard,
+)
 from keyboards.participant import paid_keyboard, participant_main_keyboard
-from permissions import get_role
+from permissions import get_role, is_any_staff
 from services.user_service import get_user_by_telegram_id
+from states.auction import AuctionCreationStates
+from states.bid import BidStates
 from states.registration import RegistrationStates
 
 router = Router()
@@ -72,10 +79,29 @@ async def cmd_start(message: Message, session: AsyncSession, state: FSMContext) 
 
 
 @router.message(Command("cancel"))
-async def cmd_cancel(message: Message, state: FSMContext) -> None:
+async def cmd_cancel(message: Message, state: FSMContext, session: AsyncSession) -> None:
     current = await state.get_state()
-    if current:
-        await state.clear()
-        await message.answer("❌ Действие отменено. Отправьте /start для продолжения.")
-    else:
+    if not current:
         await message.answer("Нечего отменять.")
+        return
+
+    was_auction_creation = current.startswith(f"{AuctionCreationStates.__name__}:")
+    was_bid_amount = current.startswith(f"{BidStates.__name__}:")
+    await state.clear()
+
+    if was_auction_creation and await is_any_staff(session, message.from_user.id):
+        role = await get_role(session, message.from_user.id)
+        await message.answer(
+            "❌ Создание аукциона отменено.",
+            reply_markup=staff_main_keyboard_for_role(role or "manager"),
+        )
+        return
+
+    if was_bid_amount:
+        await message.answer(
+            "Ввод ставки отменён.",
+            reply_markup=participant_main_keyboard(),
+        )
+        return
+
+    await message.answer("❌ Действие отменено. Отправьте /start для продолжения.")

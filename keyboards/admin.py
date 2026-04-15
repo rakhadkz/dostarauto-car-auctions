@@ -5,7 +5,9 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 
-from callbacks import AuctionCB, DonePhotosCB, StaffActionCB, UserActionCB
+from callbacks import AuctionCB, DonePhotosCB, PageCB, StaffActionCB, UserActionCB
+
+PAGE_SIZE = 5
 
 # ── Role-based main keyboards ─────────────────────────────────────────────────
 
@@ -48,6 +50,24 @@ def manager_main_keyboard() -> ReplyKeyboardMarkup:
     """Managers: auctions only (no user management)."""
     return ReplyKeyboardMarkup(
         keyboard=_AUCTION_ROWS,
+        resize_keyboard=True,
+    )
+
+
+def staff_main_keyboard_for_role(role: str) -> ReplyKeyboardMarkup:
+    if role == "superadmin":
+        return superadmin_main_keyboard()
+    if role == "admin":
+        return admin_main_keyboard()
+    return manager_main_keyboard()
+
+
+AUCTION_CREATION_CANCEL_TEXT = "❌ Отменить создание"
+
+
+def auction_creation_cancel_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=AUCTION_CREATION_CANCEL_TEXT)]],
         resize_keyboard=True,
     )
 
@@ -185,6 +205,29 @@ def staff_management_keyboard() -> ReplyKeyboardMarkup:
         ],
         resize_keyboard=True,
     )
+
+
+def pagination_keyboard(
+    section: str, page: int, total_pages: int
+) -> InlineKeyboardMarkup | None:
+    if total_pages <= 1:
+        return None
+    buttons: list[InlineKeyboardButton] = []
+    if page > 1:
+        buttons.append(
+            InlineKeyboardButton(
+                text="◀️ Назад",
+                callback_data=PageCB(section=section, page=page - 1).pack(),
+            )
+        )
+    if page < total_pages:
+        buttons.append(
+            InlineKeyboardButton(
+                text="Вперёд ▶️",
+                callback_data=PageCB(section=section, page=page + 1).pack(),
+            )
+        )
+    return InlineKeyboardMarkup(inline_keyboard=[buttons])
 
 
 def done_photos_keyboard() -> InlineKeyboardMarkup:

@@ -1,12 +1,25 @@
+import math
+
 from aiogram import Bot, F, Router
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from callbacks import UserActionCB
+from callbacks import PageCB, UserActionCB
 from config import settings
+from keyboards.admin import (
+    PAGE_SIZE,
+    pagination_keyboard,
+    payment_confirmation_keyboard,
+    revoke_keyboard,
+    user_approval_keyboard,
+)
 from keyboards.participant import paid_keyboard, participant_main_keyboard
 from permissions import can_manage_clients, can_revoke
-from services.user_service import get_users_by_status, update_user_status
+from services.user_service import (
+    count_users_by_status,
+    get_users_by_status,
+    update_user_status,
+)
 
 router = Router()
 
@@ -21,78 +34,114 @@ def _fmt_user(user) -> str:
     )
 
 
-@router.message(F.text == "👥 Заявки на регистрацию")
-async def show_pending_users(message: Message, session: AsyncSession) -> None:
-    if not await can_manage_clients(session, message.from_user.id):
+_USER_SECTIONS: dict[str, dict] = {
+    "pending": {
+        "status": "pending_review",
+        "title": "👥 Заявки на регистрацию",
+        "empty": "📭 Нет заявок на регистрацию.",
+        "order": "created_desc",
+        "keyboard": user_approval_keyboard,
+    },
+    "awaiting_pay": {
+        "status": "approved_waiting_payment",
+        "title": "💰 Ожидают оплаты",
+        "empty": "📭 Нет пользователей, ожидающих оплаты.",
+        "order": "created_desc",
+        "keyboard": None,
+    },
+    "confirm_pay": {
+        "status": "payment_pending_check",
+        "title": "✔️ Подтверждение оплаты",
+        "empty": "📭 Нет оплат для подтверждения.",
+        "order": "created_desc",
+        "keyboard": payment_confirmation_keyboard,
+    },
+    "approved": {
+        "status": "approved",
+        "title": "👤 Одобренные пользователи",
+        "empty": "📭 Нет одобренных пользователей.",
+        "order": "name_asc",
+        "keyboard": revoke_keyboard,
+    },
+}
+
+
+async def _send_user_page(
+    message: Message, session: AsyncSession, section_key: str, page: int
+) -> None:
+    sec = _USER_SECTIONS[section_key]
+    total = await count_users_by_status(session, sec["status"])
+    if total == 0:
+        await message.answer(sec["empty"])
         return
 
-    from keyboards.admin import user_approval_keyboard
+    total_pages = math.ceil(total / PAGE_SIZE)
+    page = max(1, min(page, total_pages))
+    offset = (page - 1) * PAGE_SIZE
 
-    users = await get_users_by_status(session, "pending_review")
-    if not users:
-        await message.answer("📭 Нет заявок на регистрацию.")
-        return
+    users = await get_users_by_status(
+        session, sec["status"], offset=offset, limit=PAGE_SIZE, order=sec["order"]
+    )
 
+    start_idx = offset + 1
+    end_idx = offset + len(users)
+    await message.answer(
+        f"{sec['title']} ({start_idx}–{end_idx} из {total})",
+        parse_mode="Markdown",
+    )
+
+    kb_factory = sec["keyboard"]
     for user in users:
         await message.answer(
             _fmt_user(user),
             parse_mode="Markdown",
-            reply_markup=user_approval_keyboard(user.id),
+            reply_markup=kb_factory(user.id) if kb_factory else None,
         )
+
+    nav = pagination_keyboard(section_key, page, total_pages)
+    if nav:
+        await message.answer(f"Страница: {page}/{total_pages}", reply_markup=nav)
+
+
+@router.message(F.text == "👥 Заявки на регистрацию")
+async def show_pending_users(message: Message, session: AsyncSession) -> None:
+    if not await can_manage_clients(session, message.from_user.id):
+        return
+    await _send_user_page(message, session, "pending", 1)
 
 
 @router.message(F.text == "💰 Ожидают оплаты")
 async def show_awaiting_payment(message: Message, session: AsyncSession) -> None:
     if not await can_manage_clients(session, message.from_user.id):
         return
-
-    users = await get_users_by_status(session, "approved_waiting_payment")
-    if not users:
-        await message.answer("📭 Нет пользователей, ожидающих оплаты.")
-        return
-
-    for user in users:
-        await message.answer(_fmt_user(user), parse_mode="Markdown")
+    await _send_user_page(message, session, "awaiting_pay", 1)
 
 
 @router.message(F.text == "✔️ Подтверждение оплаты")
 async def show_payment_confirmations(message: Message, session: AsyncSession) -> None:
     if not await can_manage_clients(session, message.from_user.id):
         return
-
-    from keyboards.admin import payment_confirmation_keyboard
-
-    users = await get_users_by_status(session, "payment_pending_check")
-    if not users:
-        await message.answer("📭 Нет оплат для подтверждения.")
-        return
-
-    for user in users:
-        await message.answer(
-            _fmt_user(user),
-            parse_mode="Markdown",
-            reply_markup=payment_confirmation_keyboard(user.id),
-        )
+    await _send_user_page(message, session, "confirm_pay", 1)
 
 
 @router.message(F.text == "👤 Одобренные пользователи")
 async def show_approved_users(message: Message, session: AsyncSession) -> None:
     if not await can_manage_clients(session, message.from_user.id):
         return
+    await _send_user_page(message, session, "approved", 1)
 
-    from keyboards.admin import revoke_keyboard
 
-    users = await get_users_by_status(session, "approved")
-    if not users:
-        await message.answer("📭 Нет одобренных пользователей.")
+@router.callback_query(PageCB.filter(F.section.in_(_USER_SECTIONS.keys())))
+async def paginate_users(
+    callback: CallbackQuery, callback_data: PageCB, session: AsyncSession
+) -> None:
+    if not await can_manage_clients(session, callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
         return
-
-    for user in users:
-        await message.answer(
-            _fmt_user(user),
-            parse_mode="Markdown",
-            reply_markup=revoke_keyboard(user.id),
-        )
+    await callback.answer()
+    await _send_user_page(
+        callback.message, session, callback_data.section, callback_data.page
+    )
 
 
 @router.message(F.text == "🚫 Заблокированные пользователи")
@@ -117,13 +166,18 @@ async def show_revoked_users(message: Message, session: AsyncSession) -> None:
 
 @router.callback_query(UserActionCB.filter(F.action == "approve"))
 async def approve_user(
-    callback: CallbackQuery, callback_data: UserActionCB, session: AsyncSession, bot: Bot
+    callback: CallbackQuery,
+    callback_data: UserActionCB,
+    session: AsyncSession,
+    bot: Bot,
 ) -> None:
     if not await can_manage_clients(session, callback.from_user.id):
         await callback.answer("Нет доступа", show_alert=True)
         return
 
-    user = await update_user_status(session, callback_data.user_id, "approved_waiting_payment")
+    user = await update_user_status(
+        session, callback_data.user_id, "approved_waiting_payment"
+    )
     if not user:
         await callback.answer("Пользователь не найден.", show_alert=True)
         return
@@ -148,7 +202,10 @@ async def approve_user(
 
 @router.callback_query(UserActionCB.filter(F.action == "reject"))
 async def reject_user(
-    callback: CallbackQuery, callback_data: UserActionCB, session: AsyncSession, bot: Bot
+    callback: CallbackQuery,
+    callback_data: UserActionCB,
+    session: AsyncSession,
+    bot: Bot,
 ) -> None:
     if not await can_manage_clients(session, callback.from_user.id):
         await callback.answer("Нет доступа", show_alert=True)
@@ -176,7 +233,10 @@ async def reject_user(
 
 @router.callback_query(UserActionCB.filter(F.action == "revoke"))
 async def revoke_user(
-    callback: CallbackQuery, callback_data: UserActionCB, session: AsyncSession, bot: Bot
+    callback: CallbackQuery,
+    callback_data: UserActionCB,
+    session: AsyncSession,
+    bot: Bot,
 ) -> None:
     if not await can_revoke(session, callback.from_user.id):
         await callback.answer("Нет доступа", show_alert=True)
@@ -204,7 +264,10 @@ async def revoke_user(
 
 @router.callback_query(UserActionCB.filter(F.action == "restore"))
 async def restore_user(
-    callback: CallbackQuery, callback_data: UserActionCB, session: AsyncSession, bot: Bot
+    callback: CallbackQuery,
+    callback_data: UserActionCB,
+    session: AsyncSession,
+    bot: Bot,
 ) -> None:
     if not await can_revoke(session, callback.from_user.id):
         await callback.answer("Нет доступа", show_alert=True)
@@ -233,7 +296,10 @@ async def restore_user(
 
 @router.callback_query(UserActionCB.filter(F.action == "confirm_payment"))
 async def confirm_payment(
-    callback: CallbackQuery, callback_data: UserActionCB, session: AsyncSession, bot: Bot
+    callback: CallbackQuery,
+    callback_data: UserActionCB,
+    session: AsyncSession,
+    bot: Bot,
 ) -> None:
     if not await can_manage_clients(session, callback.from_user.id):
         await callback.answer("Нет доступа", show_alert=True)

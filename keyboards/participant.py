@@ -18,6 +18,16 @@ def participant_main_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
+BID_AMOUNT_CANCEL_TEXT = "❌ Отменить ввод"
+
+
+def bid_amount_cancel_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=BID_AMOUNT_CANCEL_TEXT)]],
+        resize_keyboard=True,
+    )
+
+
 def paid_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="💳 Я оплатил")]],
