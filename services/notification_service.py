@@ -71,7 +71,8 @@ async def send_auction_to_user(bot: Bot, user_id: int, auction: Auction) -> None
             f"🚗 *Новый аукцион: {auction.title}*\n\n"
             f"{auction.description}\n\n"
             f"💰 Минимальная ставка: {float(auction.min_bid):,.0f} KZT\n"
-            f"⏰ Завершается: {end_time_str}"
+            f"⏰ Завершается: {end_time_str}\n\n"
+            "⚠️ Обратите внимание: при выигрыше взимается комиссия 2% от итоговой стоимости лота."
         )
         await bot.send_message(
             user_id,

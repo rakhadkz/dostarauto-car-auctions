@@ -211,7 +211,9 @@ async def prompt_delete_bid(
         return
 
     auction = (
-        await session.execute(select(Auction).where(Auction.id == callback_data.auction_id))
+        await session.execute(
+            select(Auction).where(Auction.id == callback_data.auction_id)
+        )
     ).scalar_one_or_none()
     if not auction or auction.status != "active":
         await callback.answer("❌ Аукцион уже не активен.", show_alert=True)
@@ -261,7 +263,9 @@ async def confirm_delete_bid(
         return
 
     auction = (
-        await session.execute(select(Auction).where(Auction.id == callback_data.auction_id))
+        await session.execute(
+            select(Auction).where(Auction.id == callback_data.auction_id)
+        )
     ).scalar_one_or_none()
     if not auction or auction.status != "active":
         await callback.answer("❌ Аукцион уже не активен.", show_alert=True)
@@ -364,6 +368,9 @@ async def show_active_auctions(message: Message, session: AsyncSession) -> None:
     }
 
     now = datetime.now(tz=timezone.utc)
+    await message.answer(
+        "⚠️ Обратите внимание: при выигрыше взимается комиссия 2% от итоговой стоимости лота.\n"
+    )
     for auction in auctions:
         delta = auction.end_time.replace(tzinfo=timezone.utc) - now
         hours = max(0, int(delta.total_seconds() // 3600))
@@ -395,14 +402,14 @@ async def show_active_auctions(message: Message, session: AsyncSession) -> None:
             text += "\n\n📊 *Участники:*\n"
             for i, bid in enumerate(sorted_bids, 1):
                 if bid.user_id == user.id:
-                    text += f"{i}. {bid.user.full_name} — {float(bid.amount):,.0f} KZT\n"
+                    text += (
+                        f"{i}. {bid.user.full_name} — {float(bid.amount):,.0f} KZT\n"
+                    )
                 else:
                     text += f"Участник #{i} — {float(bid.amount):,.0f} KZT\n"
             my_bid = next((b for b in sorted_bids if b.user_id == user.id), None)
             if my_bid:
-                text += (
-                    f"\n💵 *Ваша ставка:* {float(my_bid.amount):,.0f} KZT\n"
-                )
+                text += f"\n💵 *Ваша ставка:* {float(my_bid.amount):,.0f} KZT\n"
             text += (
                 f"\n💡 Вы можете увеличить вашу ставку. "
                 f"Следующая ставка должна быть не менее *{next_min:,.0f} KZT*. "
